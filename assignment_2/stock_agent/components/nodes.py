@@ -1,11 +1,10 @@
 import pandas as pd
-from typing import Dict, Any
 from components.state import StockAgentState
 from components.config import config
 from components.helper_functions import (
     calculate_sma,
     calculate_rsi,
-    evaluate_recommendation
+    evaluate_recommendation,
 )
 
 try:
@@ -13,10 +12,9 @@ try:
 except ImportError:
     yf = None
 
+
 def fetch_stock_data(state: StockAgentState) -> StockAgentState:
-    """
-    Node 1: Fetch 60 days of historical stock data using yfinance.
-    """
+    """Download 60 days of daily stock history from Yahoo Finance."""
     raw_ticker = (state.get("ticker") or "").strip().upper()
     if not raw_ticker:
         state["error"] = "Invalid ticker symbol: Ticker cannot be empty."
@@ -33,7 +31,7 @@ def fetch_stock_data(state: StockAgentState) -> StockAgentState:
         hist = ticker_obj.history(period=config.HISTORY_PERIOD, interval=config.HISTORY_INTERVAL)
 
         if hist is None or hist.empty:
-            state["error"] = f"No historical stock data found for ticker '{raw_ticker}'. Please verify the ticker symbol."
+            state["error"] = f"No historical stock data found for ticker '{raw_ticker}'."
             return state
 
         if "Close" not in hist.columns:
@@ -43,8 +41,8 @@ def fetch_stock_data(state: StockAgentState) -> StockAgentState:
         close_series = hist["Close"].dropna()
         if len(close_series) < config.MIN_REQUIRED_DAYS:
             state["error"] = (
-                f"Insufficient historical data for '{raw_ticker}': found {len(close_series)} trading days, "
-                f"minimum {config.MIN_REQUIRED_DAYS} required."
+                f"Insufficient historical data for '{raw_ticker}': found {len(close_series)} days, "
+                f"need at least {config.MIN_REQUIRED_DAYS}."
             )
             return state
 
@@ -62,25 +60,24 @@ def fetch_stock_data(state: StockAgentState) -> StockAgentState:
             "close_prices": [round(float(x), 4) for x in close_series.tolist()],
             "high_prices": [round(float(x), 4) for x in highs],
             "low_prices": [round(float(x), 4) for x in lows],
-            "volumes": [int(v) for v in volumes] if volumes else []
+            "volumes": [int(v) for v in volumes] if volumes else [],
         }
         state["error"] = None
 
     except Exception as e:
-        state["error"] = f"Failed to fetch stock data for '{raw_ticker}': {str(e)}"
+        state["error"] = f"Failed to fetch stock data for '{raw_ticker}': {e}"
 
     return state
 
+
 def calculate_indicators(state: StockAgentState) -> StockAgentState:
-    """
-    Node 2: Calculate SMA-10, SMA-20, 14-day RSI, and key price summary statistics.
-    """
+    """Compute SMA-10, SMA-20, RSI-14, and basic price stats."""
     if state.get("error"):
         return state
 
     stock_data = state.get("stock_data")
     if not stock_data or not stock_data.get("close_prices"):
-        state["error"] = "Stock data is unavailable for technical indicator calculation."
+        state["error"] = "Stock data is unavailable for indicator calculation."
         return state
 
     try:
@@ -113,27 +110,22 @@ def calculate_indicators(state: StockAgentState) -> StockAgentState:
             "avg_volume": avg_volume,
             "sma_10": sma_10,
             "sma_20": sma_20,
-            "rsi_14": rsi_14
+            "rsi_14": rsi_14,
         }
 
     except Exception as e:
-        state["error"] = f"Error calculating technical indicators: {str(e)}"
+        state["error"] = f"Error calculating technical indicators: {e}"
 
     return state
 
+
 def generate_recommendation(state: StockAgentState) -> StockAgentState:
-    """
-    Node 3: Generate BUY / HOLD / SELL recommendation and format the final report.
-    """
+    """Build the final recommendation and text report."""
     if state.get("error"):
-        sep = "=" * 64
         state["analysis_report"] = "\n".join([
-            sep,
-            f"STOCK MARKET ANALYSIS REPORT — {state.get('ticker') or 'N/A'}",
-            sep,
-            "STATUS: ERROR",
+            f"Stock Analysis Report: {state.get('ticker') or 'N/A'}",
+            "Status: Error",
             f"Details: {state['error']}",
-            sep
         ])
         return state
 
@@ -145,40 +137,36 @@ def generate_recommendation(state: StockAgentState) -> StockAgentState:
             current_price=ind["current_price"],
             sma_10=ind["sma_10"],
             sma_20=ind["sma_20"],
-            rsi_14=ind["rsi_14"]
+            rsi_14=ind["rsi_14"],
         )
         state["recommendation"] = rec
 
-        reasons_formatted = "\n".join(f"  • {r}" for r in rec["reasons"])
+        reasons_formatted = "\n".join(f"- {r}" for r in rec["reasons"])
         report_lines = [
-            "=" * 64,
-            f"STOCK MARKET ANALYSIS REPORT: {stock_data['ticker']}",
-            "=" * 64,
-            f"Analysis Window : {stock_data['start_date']} to {stock_data['end_date']} ({stock_data['trading_days']} trading days)",
+            f"Stock Analysis Report: {stock_data['ticker']}",
+            f"Period: {stock_data['start_date']} to {stock_data['end_date']} ({stock_data['trading_days']} trading days)",
             "",
-            "1. PRICE & VOLUME SUMMARY",
-            f"   • Current Price      : ${ind['current_price']:.2f} ({ind['daily_change_pct']:+.2f}% today)",
-            f"   • 60-Day Change      : {ind['period_change_pct']:+.2f}%",
-            f"   • 60-Day Range       : ${ind['period_low']:.2f} – ${ind['period_high']:.2f}",
-            f"   • Avg Daily Volume   : {ind['avg_volume']:,}",
+            "Price Summary:",
+            f"- Current Price: ${ind['current_price']:.2f} ({ind['daily_change_pct']:+.2f}% today)",
+            f"- 60-Day Change: {ind['period_change_pct']:+.2f}%",
+            f"- 60-Day Range: ${ind['period_low']:.2f} to ${ind['period_high']:.2f}",
+            f"- Avg Daily Volume: {ind['avg_volume']:,}",
             "",
-            "2. TECHNICAL INDICATORS",
-            f"   • 10-Day SMA         : ${ind['sma_10']:.2f}",
-            f"   • 20-Day SMA         : ${ind['sma_20']:.2f}",
-            f"   • 14-Day RSI         : {ind['rsi_14']:.2f}",
-            f"   • Trend Signal       : {rec['trend_signal']}",
-            f"   • Momentum Signal    : {rec['momentum_signal']}",
+            "Technical Indicators:",
+            f"- 10-Day SMA: ${ind['sma_10']:.2f}",
+            f"- 20-Day SMA: ${ind['sma_20']:.2f}",
+            f"- 14-Day RSI: {ind['rsi_14']:.2f}",
+            f"- Trend Signal: {rec['trend_signal']}",
+            f"- Momentum Signal: {rec['momentum_signal']}",
             "",
-            "3. RECOMMENDATION",
-            f"   >>> ACTION: {rec['action']} (Confidence: {rec['confidence']}) <<<",
+            f"Recommendation: {rec['action']} (Confidence: {rec['confidence']})",
             "",
-            "4. ANALYSIS RATIONALE",
+            "Notes:",
             reasons_formatted,
-            "=" * 64
         ]
         state["analysis_report"] = "\n".join(report_lines)
 
     except Exception as e:
-        state["error"] = f"Error generating recommendation report: {str(e)}"
+        state["error"] = f"Error generating recommendation report: {e}"
 
     return state

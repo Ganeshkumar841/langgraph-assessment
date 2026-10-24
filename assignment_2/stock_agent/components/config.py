@@ -1,4 +1,3 @@
-import os
 try:
     from pydantic_settings import BaseSettings
 except ImportError:
@@ -11,28 +10,26 @@ except ImportError:
 
 load_dotenv()
 
+
 class StockConfig(BaseSettings):
-    """
-    Configuration settings for the Stock Market Analysis Agent.
-    """
-    # Historical data lookback window
+    """Settings and indicator parameters for the stock agent."""
+
     HISTORY_PERIOD: str = "60d"
     HISTORY_INTERVAL: str = "1d"
     MIN_REQUIRED_DAYS: int = 20
 
-    # Technical indicator windows
     SMA_SHORT_WINDOW: int = 10
     SMA_LONG_WINDOW: int = 20
     RSI_PERIOD: int = 14
 
-    # RSI thresholds
     RSI_OVERBOUGHT: float = 70.0
     RSI_OVERSOLD: float = 30.0
 
     model_config = {
         "env_file": ".env",
         "case_sensitive": False,
-        "extra": "ignore"
+        "extra": "ignore",
     }
+
 
 config = StockConfig()
