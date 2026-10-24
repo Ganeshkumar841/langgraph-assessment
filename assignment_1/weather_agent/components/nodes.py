@@ -11,14 +11,42 @@ from components.helper_functions import (
 
 def fetch_location_data(state: WeatherAgentState) -> WeatherAgentState:
     """Fetch user location from ipapi based on IP."""
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         response = requests.get(
             config.LOCATION_API_URL,
+            headers=headers,
             timeout=config.REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         location_data = response.json()
 
+        # fallback to ipwho.is if ipapi rate-limits or blocks the request
+        if location_data.get("error"):
+            raise requests.exceptions.RequestException(location_data.get("reason", "ipapi rate limited"))
+
+    except requests.exceptions.RequestException as primary_err:
+        try:
+            fb_resp = requests.get("https://ipwho.is/", headers=headers, timeout=config.REQUEST_TIMEOUT)
+            fb_resp.raise_for_status()
+            fb = fb_resp.json()
+            if not fb.get("success", True):
+                raise ValueError(fb.get("message", "Fallback lookup failed"))
+            tz = fb.get("timezone") or {}
+            location_data = {
+                "city": fb.get("city"),
+                "region": fb.get("region"),
+                "country": fb.get("country_code"),
+                "country_name": fb.get("country"),
+                "latitude": fb.get("latitude"),
+                "longitude": fb.get("longitude"),
+                "utc_offset": tz.get("utc", "+00:00"),
+                "timezone": tz.get("id", "UTC"),
+            }
+        except Exception:
+            raise Exception(f"Failed to fetch location data: {primary_err}")
+
+    try:
         required_fields = [
             "city",
             "region",
@@ -29,13 +57,11 @@ def fetch_location_data(state: WeatherAgentState) -> WeatherAgentState:
             "timezone",
         ]
         for field in required_fields:
-            if field not in location_data:
+            if field not in location_data or location_data[field] is None:
                 raise ValueError(f"Missing required field: {field}")
 
         state["location_data"] = location_data
 
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Failed to fetch location data: {e}")
     except ValueError as e:
         raise Exception(f"Invalid location data received: {e}")
     except Exception as e:
